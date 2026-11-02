@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -36,31 +35,42 @@ func checkStatus(client *http.Client, url string, expectedStatus int) Result {
 	return result
 }
 
+func PrintResult(result Result) {
+	if result.Error != nil {
+		fmt.Println(result.URL, "DOWN", result.Error)
+		return
+	}
+	if result.Up {
+		fmt.Println(result.URL, "UP", result.StatusCode, result.Elapsed)
+	} else {
+		fmt.Println(result.URL, "DOWN", result.StatusCode, result.Elapsed)
+	}
+}
+
+func monitorURL(client *http.Client, url string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		result := checkStatus(client, url, 200)
+		PrintResult(result)
+		<-ticker.C
+	}
+}
+
 func main() {
 	urls := []string{
 		"https://google.com",
 		"https://gobyexample.com",
 		"https://mail.google.com",
 	}
-	var wg sync.WaitGroup
 	var client = &http.Client{Timeout: 10 * time.Second}
 
 	for _, url := range urls {
-		wg.Add(1)
 		go func(u string) {
-			defer wg.Done()
-			result := checkStatus(client, u, 200)
-			if result.Error != nil {
-				fmt.Println(result.URL, "DOWN", result.Error)
-				return
-			}
-			if result.Up {
-				fmt.Println(result.URL, "UP", result.StatusCode, result.Elapsed)
-			} else {
-				fmt.Println(result.URL, "DOWN", result.StatusCode, result.Elapsed)
-			}
+			monitorURL(client, u, 10*time.Second)
 		}(url)
 	}
 
-	wg.Wait()
+	select {}
 }
