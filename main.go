@@ -7,17 +7,33 @@ import (
 	"time"
 )
 
-func checkStatus(client *http.Client, url string) (int, time.Duration, error) {
+type Result struct {
+	URL        string
+	StatusCode int
+	Elapsed    time.Duration
+	Up         bool
+	Error      error
+}
+
+func checkStatus(client *http.Client, url string, expectedStatus int) Result {
 	start := time.Now()
 	resp, err := client.Get(url)
 	elapsed := time.Since(start)
 
+	result := Result{
+		URL:     url,
+		Elapsed: elapsed,
+	}
+
 	if err != nil {
-		return 0, elapsed, err
+		result.Error = err
+		return result
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode, elapsed, nil
+	result.StatusCode = resp.StatusCode
+	result.Up = resp.StatusCode == expectedStatus
+	return result
 }
 
 func main() {
@@ -33,12 +49,16 @@ func main() {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
-			code, elapsed, err := checkStatus(client, u)
-			if err != nil {
-				fmt.Println(u, "ERROR:", err)
+			result := checkStatus(client, u, 200)
+			if result.Error != nil {
+				fmt.Println(result.URL, "DOWN", result.Error)
 				return
 			}
-			fmt.Println(u, code, elapsed)
+			if result.Up {
+				fmt.Println(result.URL, "UP", result.StatusCode, result.Elapsed)
+			} else {
+				fmt.Println(result.URL, "DOWN", result.StatusCode, result.Elapsed)
+			}
 		}(url)
 	}
 
