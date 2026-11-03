@@ -35,7 +35,7 @@ func checkStatus(client *http.Client, url string, expectedStatus int) Result {
 	return result
 }
 
-func PrintResult(result Result) {
+func printResult(result Result) {
 	if result.Error != nil {
 		fmt.Println(result.URL, "DOWN", result.Error)
 		return
@@ -51,10 +51,15 @@ func monitorURL(client *http.Client, url string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for {
+	previousResult := checkStatus(client, url, 200)
+	printResult(previousResult)
+
+	for range ticker.C {
 		result := checkStatus(client, url, 200)
-		PrintResult(result)
-		<-ticker.C
+		if result.Up != previousResult.Up {
+			printResult(result)
+			previousResult = result
+		}
 	}
 }
 
