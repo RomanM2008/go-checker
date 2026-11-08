@@ -31,6 +31,10 @@ func (n *Notifier) Send(text string) error {
 
 	resp, err := n.client.PostForm(endpoint, data)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return fmt.Errorf("telegram request failed: %v", urlErr.Err)
+		}
 		return errors.New("telegram request failed")
 	}
 	defer resp.Body.Close()
