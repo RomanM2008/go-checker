@@ -21,6 +21,15 @@ type Monitor struct {
 	Interval       time.Duration
 }
 
+type StatusChange struct {
+	URL            string
+	ExpectedStatus int
+	Up             bool
+	StatusCode     int
+	Error          string
+	DownFor        time.Duration
+}
+
 func checkStatus(client *http.Client, url string, expectedStatus int) Result {
 	start := time.Now()
 	resp, err := client.Get(url)
@@ -54,38 +63,61 @@ func printResult(result Result) {
 	}
 }
 
+func newStatusChange(m Monitor, r Result) StatusChange {
+	st := StatusChange{
+		URL:            m.URL,
+		ExpectedStatus: m.ExpectedStatus,
+		Up:             r.Up,
+		StatusCode:     r.StatusCode,
+	}
+
+	if r.Error != nil {
+		st.Error = r.Error.Error()
+	}
+	return st
+}
+
 func runMonitor(client *http.Client, n *Notifier, m Monitor) {
+	var downSince time.Time
 	ticker := time.NewTicker(m.Interval)
 	defer ticker.Stop()
 
-	previousResult := checkStatus(client, m.URL, m.ExpectedStatus)
-	printResult(previousResult)
-	if !previousResult.Up {
-		notify(n, previousResult)
-	}
+	wasUp := true
 
-	for range ticker.C {
+	for {
 		result := checkStatus(client, m.URL, m.ExpectedStatus)
-		if result.Up != previousResult.Up {
-			printResult(result)
-			notify(n, result)
-			previousResult = result
+		printResult(result)
+		if result.Up != wasUp {
+			st := newStatusChange(m, result)
+
+			if result.Up {
+				st.DownFor = time.Since(downSince)
+			} else {
+				downSince = time.Now()
+			}
+
+			notify(n, st)
+			wasUp = result.Up
 		}
+		<-ticker.C
 	}
 }
 
-func notify(n *Notifier, result Result) {
-	if err := n.Send(formatMessage(result)); err != nil {
+func notify(n *Notifier, st StatusChange) {
+	if err := n.Send(formatMessage(st)); err != nil {
 		log.Println("failed to send notification:", err)
 	}
 }
 
-func formatMessage(result Result) string {
-	if result.Up {
-		return fmt.Sprintf("🟢 %s is UP again", result.URL)
+func formatMessage(st StatusChange) string {
+	if st.Up {
+		if st.DownFor > 0 {
+			return fmt.Sprintf("🟢 %s is UP again. Down for %v", st.URL, st.DownFor.Round(time.Second))
+		}
+		return fmt.Sprintf("🟢 %s is UP", st.URL)
 	}
-	if result.Error != nil {
-		return fmt.Sprintf("🔴 %s is DOWN: %v", result.URL, result.Error)
+	if st.Error != "" {
+		return fmt.Sprintf("🔴 %s is DOWN: %s", st.URL, st.Error)
 	}
-	return fmt.Sprintf("🔴 %s is DOWN: unexpected status %d", result.URL, result.StatusCode)
+	return fmt.Sprintf("🔴 %s is DOWN: unexpected status %d, expected %d", st.URL, st.StatusCode, st.ExpectedStatus)
 }
